@@ -6,7 +6,7 @@ Resources:
   DatabaseRefreshFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: lambda_vsa_data.lambda_handler  # Updated to match your file name
+      Handler: lambda_vsa_data.lambda_handler
       Runtime: python3.12
       Architectures:
         - arm64
