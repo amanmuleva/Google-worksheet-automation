@@ -10,7 +10,7 @@ Resources:
       Runtime: python3.12
       Architectures:
         - arm64
-      CodeUri: lambda_vsa_data.py 
+      CodeUri: lambda_vsa_data
       MemorySize: 128
       Timeout: 300  
       Environment:
