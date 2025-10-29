@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template to create a Database Automation Script to refresh the database with the new data from the google sheets
+
+Resources:
+  DatabaseRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_vsa_data.lambda_handler  # Updated to match your file name
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      CodeUri: lambda_vsa_data.py 
+      MemorySize: 128
+      Timeout: 300  
+      Environment:
+        Variables:
+          PYTHONPATH: /var/runtime
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: 
+                - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vonage/googleapi/sheets*'
+                - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vonage/cloudquery/cloudquery*'
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      Events:
+        MyDailySchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: "cron(0 12 * * ? *)"  # Changed to 12:00 UTC (7:00 AM EST)
+            ScheduleExpressionTimezone: "UTC"  # Use UTC for consistency
+            Description: "Daily refresh of VSA data from Google Sheets to PostgreSQL"
+
+  # Add CloudWatch Log Group for better log management
+  DatabaseRefreshLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DatabaseRefreshFunction}'
+      RetentionInDays: 14
+
+Outputs:
+  DatabaseRefreshFunctionArn:
+    Description: "Database Refresh Lambda Function ARN"
+    Value: !GetAtt DatabaseRefreshFunction.Arn
+  
+  ScheduleArn:
+    Description: "EventBridge Schedule ARN"
+    Value: !GetAtt DatabaseRefreshFunctionMyDailySchedule.Arn
