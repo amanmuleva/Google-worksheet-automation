@@ -5,6 +5,8 @@ from pprint import pprint
 import boto3
 import json
 from botocore.exceptions import ClientError
+import tempfile
+import os
 
 def get_secrets(secret_name, region_name):
     """
@@ -24,45 +26,43 @@ def get_secrets(secret_name, region_name):
     secret = response['SecretString']
     return json.loads(secret) if secret.startswith('{') else secret
 
-def read_google_sheet_emp_vsa_data(sheet_url, worksheet_name):
+def read_google_sheet_data(sheet_url, worksheet_name, credentials):
     """
     Reads data from a Google Sheet.
 
     :param sheet_url: The URL of the Google Sheet.
     :param worksheet_name: The name of the worksheet to read from.
+    :param credentials: Google service account credentials dictionary.
     :return: List of lists containing the rows of the worksheet.
     """
-    google_creds = get_secrets('vonage/googleapi/sheets', 'us-east-1')
+    if isinstance(credentials, dict):
+        print(f"Available keys in credentials: {list(credentials.keys())}")
+        # Check for required service account fields
+        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri']
+        missing_fields = [field for field in required_fields if field not in credentials]
+        if missing_fields:
+            print(f"Missing required fields: {missing_fields}")
 
-    gc = pygsheets.authorize(service_account_info=google_creds)
-
-    sh = gc.open_by_url(sheet_url)
+    print(type(credentials))
     
-    wks = sh.worksheet_by_title(worksheet_name)
-
-    data = wks.get_all_values(include_tailing_empty=False)
-
-    return data
-
-def read_google_sheet_vsa_apps_data(sheet_url, worksheet_name):
-    """
-    Reads data from a Google Sheet.
-
-    :param sheet_url: The URL of the Google Sheet.
-    :param worksheet_name: The name of the worksheet to read from.
-    :return: List of lists containing the rows of the worksheet.
-    """
-    google_creds = get_secrets('vonage/googleapi/sheets', 'us-east-1')
-
-    gc = pygsheets.authorize(service_account_info=google_creds)
-
-    sh = gc.open_by_url(sheet_url)
-
-    wks = sh.worksheet_by_title(worksheet_name)
-
-    data = wks.get_all_values(include_tailing_empty=False)
-
-    return data
+    # Create a temporary file with the credentials
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+        json.dump(credentials, temp_file)
+        temp_file_path = temp_file.name
+    
+    try:
+        # Use service_file (most reliable method)
+        gc = pygsheets.authorize(service_file=temp_file_path)
+        
+        sh = gc.open_by_url(sheet_url)
+        wks = sh.worksheet_by_title(worksheet_name)
+        data = wks.get_all_values(include_tailing_empty=False)
+        
+        return data
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
 
 def import_emp_data_to_postgres(data, db_config, table_name, unique_columns):
     """
@@ -154,7 +154,8 @@ def import_app_data_to_postgres(data, db_config, table_name, unique_columns):
 def lambda_handler(event, context):
     try:
         # List of Secrets to retrieve
-        secret_names = ['vonage/googleapi/sheets', 'vonage/cloudquery/cloudquery']
+        secret_name_gapi = 'vonage/googleapi/sheets'
+        secret_name_db = 'Vonage/cloudquery/cloudquery'
         region_name = 'us-east-1'  # Update if needed
         sheet_url_emp = 'https://docs.google.com/spreadsheets/d/19vvQgQkJg0y7g_P6L4yENgOnO-vAHDsg7dOX556ZXJM/edit?usp=sharing'
         sheet_url_apps = 'https://docs.google.com/spreadsheets/d/1lAWbVaBkee1ruKvIdIly33hRLlVv4b_HlexzXu1l2kI/edit?usp=sharing'
@@ -163,31 +164,23 @@ def lambda_handler(event, context):
         table_name_apps = 'vsa_app_classifications'
         table_name_emp = 'employee_vsa_attributes'
 
-        secrets = {}
+        db_secrets = get_secrets(secret_name_db, region_name)
+        google_secrets = get_secrets(secret_name_gapi, region_name)
 
-        for secret_name in secret_names:
-            try:
-                secrets[secret_name] = get_secrets(secret_name, region_name)
-            except ClientError as e:
-                print(f"Error retrieving secret {secret_name}: {e}")
-                secrets[secret_name] = None
-
-        # Validate secrets
-        if not all(secrets.values()):
-            raise Exception("Failed to retrieve required secrets")
-            
+        # Ensure google_secrets is a dictionary
+        if isinstance(google_secrets, str):
+            google_secrets = json.loads(google_secrets)
 
         db_config = {
-            'host': secrets['vonage/cloudquery/cloudquery']['host'],
-            'port': secrets['vonage/cloudquery/cloudquery']['port'],
-            'database': secrets['vonage/cloudquery/cloudquery']['database'],
-            'user': secrets['vonage/cloudquery/cloudquery']['user'],
-            'password': secrets['vonage/cloudquery/cloudquery']['password']
+            'host': db_secrets['host'],
+            'port': db_secrets['port'],
+            'user': db_secrets['rw-user'],
+            'password': db_secrets['password']
         }
-
+        
         # Read data from Google Sheets
-        data_emp = read_google_sheet_emp_vsa_data(sheet_url_emp, worksheet_name_emp)
-        data_apps = read_google_sheet_vsa_apps_data(sheet_url_apps, worksheet_name_apps)
+        data_emp = read_google_sheet_data(sheet_url_emp, worksheet_name_emp, google_secrets)
+        data_apps = read_google_sheet_data(sheet_url_apps, worksheet_name_apps, google_secrets)
 
         # Print data to verify
         for row in data_emp:
