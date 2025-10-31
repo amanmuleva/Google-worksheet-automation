@@ -35,34 +35,33 @@ def read_google_sheet_data(sheet_url, worksheet_name, credentials):
     :param credentials: Google service account credentials dictionary.
     :return: List of lists containing the rows of the worksheet.
     """
-    if isinstance(credentials, dict):
-        print(f"Available keys in credentials: {list(credentials.keys())}")
-        # Check for required service account fields
-        required_fields = ['type', 'project_id', 'private_key_id', 'private_key', 'client_email', 'client_id', 'auth_uri', 'token_uri']
-        missing_fields = [field for field in required_fields if field not in credentials]
-        if missing_fields:
-            print(f"Missing required fields: {missing_fields}")
 
     print(type(credentials))
     
-    # Create a temporary file with the credentials
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
-        json.dump(credentials, temp_file)
-        temp_file_path = temp_file.name
     
     try:
-        # Use service_file (most reliable method)
-        gc = pygsheets.authorize(service_file=temp_file_path)
+        # Write credentials to a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            json.dump(credentials, temp_file)
+            temp_file_path = temp_file.name
         
-        sh = gc.open_by_url(sheet_url)
-        wks = sh.worksheet_by_title(worksheet_name)
-        data = wks.get_all_values(include_tailing_empty=False)
-        
-        return data
-    finally:
-        # Clean up the temporary file
-        if os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
+        try:
+            # Use service_file with the temporary file path
+            gc = pygsheets.authorize(service_file=temp_file_path)
+            
+            sh = gc.open_by_url(sheet_url)
+            wks = sh.worksheet_by_title(worksheet_name)
+            data = wks.get_all_values(include_tailing_empty=False)
+            
+            return data
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+            
+    except Exception as e:
+        print(f"Error reading Google Sheet: {e}")
+        raise
 
 def import_emp_data_to_postgres(data, db_config, table_name, unique_columns):
     """
@@ -170,6 +169,8 @@ def lambda_handler(event, context):
         # Ensure google_secrets is a dictionary
         if isinstance(google_secrets, str):
             google_secrets = json.loads(google_secrets)
+
+        print(google_secrets)
 
         db_config = {
             'host': db_secrets['host'],
