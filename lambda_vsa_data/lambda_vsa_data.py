@@ -38,7 +38,6 @@ def read_google_sheet_data(sheet_url, worksheet_name, credentials):
 
     print(type(credentials))
     
-    
     try:
         # Write credentials to a temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
@@ -169,8 +168,6 @@ def lambda_handler(event, context):
         # Ensure google_secrets is a dictionary
         if isinstance(google_secrets, str):
             google_secrets = json.loads(google_secrets)
-
-        print(google_secrets)
 
         db_config = {
             'host': db_secrets['host'],
