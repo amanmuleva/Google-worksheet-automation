@@ -26,7 +26,7 @@ def get_secrets(secret_name, region_name):
     secret = response['SecretString']
     return json.loads(secret) if secret.startswith('{') else secret
 
-def read_google_sheet_data(sheet_url, worksheet_name, credentials):
+def read_google_sheet_data(sheet_url, worksheet_name, credentials, gapi_sheets_token):
     """
     Reads data from a Google Sheet.
 
@@ -38,29 +38,62 @@ def read_google_sheet_data(sheet_url, worksheet_name, credentials):
 
     print(type(credentials))
     
+    temp_file_path = None
+    sheets_token_path = None
+    
     try:
-        # Write credentials to a temporary file
+        # Write client credentials to a temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
             json.dump(credentials, temp_file)
             temp_file_path = temp_file.name
+
+        sheets_token_path = '/tmp/sheets.googleapis.com-python.json'
+        with open(sheets_token_path, 'w') as sheets_token_file:
+            json.dump(gapi_sheets_token, sheets_token_file)
+
+        print(f"Created temp files: {temp_file_path}, {sheets_token_path}")
+
+        # Authorize using the credentials file
+        print("Attempting to authorize with pygsheets...")
+        gc = pygsheets.authorize(client_secret=temp_file_path, credentials_directory='/tmp')
+        print("Authorization successful")
         
-        try:
-            # Use service_file with the temporary file path
-            gc = pygsheets.authorize(service_file=temp_file_path)
-            
-            sh = gc.open_by_url(sheet_url)
-            wks = sh.worksheet_by_title(worksheet_name)
-            data = wks.get_all_values(include_tailing_empty=False)
-            
-            return data
-        finally:
-            # Clean up the temporary file
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            
+        print(f"Opening sheet: {sheet_url}")
+        sh = gc.open_by_url(sheet_url)
+        print(f"Opening worksheet: {worksheet_name}")
+        print(f"Opening sheet: {sheet_url}")
+        sh = gc.open_by_url(sheet_url)
+        
+        # Debug: List all available worksheets
+        print("Available worksheets:")
+        for worksheet in sh.worksheets():
+            print(f"  - '{worksheet.title}'")
+        
+        print(f"Looking for worksheet: '{worksheet_name}'")
+        wks = sh.worksheet_by_title(worksheet_name)
+        print("Getting data...")
+        data = wks.get_all_values(include_tailing_empty=False)
+        print(f"Retrieved {len(data)} rows")
+        #wks = sh.worksheet_by_title(worksheet_name)
+        print("Getting data...")
+        data = wks.get_all_values(include_tailing_empty=False)
+        print(f"Retrieved {len(data)} rows")
+        
+        return data
+        
     except Exception as e:
-        print(f"Error reading Google Sheet: {e}")
+        print(f"Error reading Google Sheet: {type(e).__name__}: {str(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         raise
+    finally:
+        # Clean up the temporary files
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            print(f"Cleaned up: {temp_file_path}")
+        if sheets_token_path and os.path.exists(sheets_token_path):
+            os.remove(sheets_token_path)
+            print(f"Cleaned up: {sheets_token_path}")
 
 def import_emp_data_to_postgres(data, db_config, table_name, unique_columns):
     """
@@ -154,6 +187,7 @@ def lambda_handler(event, context):
         # List of Secrets to retrieve
         secret_name_gapi = 'vonage/googleapi/sheets'
         secret_name_db = 'Vonage/cloudquery/cloudquery'
+        gapi_token = 'vonage/googleapi/sheets-tokens'
         region_name = 'us-east-1'  # Update if needed
         sheet_url_emp = 'https://docs.google.com/spreadsheets/d/19vvQgQkJg0y7g_P6L4yENgOnO-vAHDsg7dOX556ZXJM/edit?usp=sharing'
         sheet_url_apps = 'https://docs.google.com/spreadsheets/d/1lAWbVaBkee1ruKvIdIly33hRLlVv4b_HlexzXu1l2kI/edit?usp=sharing'
@@ -164,6 +198,7 @@ def lambda_handler(event, context):
 
         db_secrets = get_secrets(secret_name_db, region_name)
         google_secrets = get_secrets(secret_name_gapi, region_name)
+        gapi_sheets_token = get_secrets(gapi_token, region_name)
 
         # Ensure google_secrets is a dictionary
         if isinstance(google_secrets, str):
@@ -177,8 +212,8 @@ def lambda_handler(event, context):
         }
         
         # Read data from Google Sheets
-        data_emp = read_google_sheet_data(sheet_url_emp, worksheet_name_emp, google_secrets)
-        data_apps = read_google_sheet_data(sheet_url_apps, worksheet_name_apps, google_secrets)
+        data_emp = read_google_sheet_data(sheet_url_emp, worksheet_name_emp, google_secrets, gapi_sheets_token)
+        data_apps = read_google_sheet_data(sheet_url_apps, worksheet_name_apps, google_secrets, gapi_sheets_token)
 
         # Print data to verify
         for row in data_emp:
