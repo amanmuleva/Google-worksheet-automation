@@ -75,9 +75,6 @@ def read_google_sheet_data(sheet_url, worksheet_name, credentials, gapi_sheets_t
         data = wks.get_all_values(include_tailing_empty=False)
         print(f"Retrieved {len(data)} rows")
         #wks = sh.worksheet_by_title(worksheet_name)
-        print("Getting data...")
-        data = wks.get_all_values(include_tailing_empty=False)
-        print(f"Retrieved {len(data)} rows")
         
         return data
         
@@ -110,12 +107,28 @@ def import_emp_data_to_postgres(data, db_config, table_name, unique_columns):
     cursor = conn.cursor()
 
     columns = ['name', 'email', 'vsa_uspr_access', 'vsa_pe_access', 'vsa_noc_access', 'vsa_dci_access', 'vsa_sc_access']
+    expected_column_count = len(columns)
     
     # Prepare the SQL query to insert data
     insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES %s"
 
-    # Prepare the data for insertion, excluding the header row
-    values = [tuple(row) for row in data[1:]] #skip the first row
+    # Prepare the data for insertion, excluding the header row and validating row length
+    values = []
+    for i, row in enumerate(data[1:], start=2):  # Skip header, start counting from row 2
+        # Pad row with empty strings if it's too short, or truncate if too long
+        normalized_row = (row + [''] * expected_column_count)[:expected_column_count]
+        
+        # Skip completely empty rows
+        if any(cell.strip() for cell in normalized_row if cell):
+            values.append(tuple(normalized_row))
+        else:
+            print(f"Skipping empty row {i}")
+
+    if not values:
+        print("No valid data rows found for employee data")
+        cursor.close()
+        conn.close()
+        return
 
     # Prepare the ON CONFLICT clause for upsert
     conflict_clause = f"ON CONFLICT ({', '.join(unique_columns)}) DO UPDATE SET "
@@ -148,21 +161,47 @@ def import_app_data_to_postgres(data, db_config, table_name, unique_columns):
     cursor = conn.cursor()
 
     columns = ['name', 'owner', 'vsa_type', 'vsa_uspr', 'vsa_pe', 'vsa_noc', 'vsa_dci', 'vsa_sc']
+    expected_column_count = len(columns)
 
     # Prepare the SQL query to insert data
     insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES %s"
 
-    # Prepare the data for insertion, excluding the header row
-    values = [tuple(row) for row in data[1:]]  # Skip the first row
+    # Prepare the data for insertion, excluding the header row and validating row length
+    raw_values = []
+    for i, row in enumerate(data[1:], start=2):  # Skip header, start counting from row 2
+        # Pad row with empty strings if it's too short, or truncate if too long
+        normalized_row = (row + [''] * expected_column_count)[:expected_column_count]
+        
+        # Skip completely empty rows
+        if any(cell.strip() for cell in normalized_row if cell):
+            raw_values.append(tuple(normalized_row))
+        else:
+            print(f"Skipping empty row {i}")
 
-     # Remove duplicates based on unique columns
+    if not raw_values:
+        print("No valid data rows found for app data")
+        cursor.close()
+        conn.close()
+        return
+
+    # Remove duplicates based on unique columns
     seen = set()
     unique_values = []
-    for row in values:
-        unique_key = tuple(row[columns.index(col)] for col in unique_columns)
-        if unique_key not in seen:
-            seen.add(unique_key)
-            unique_values.append(row)
+    for row in raw_values:
+        try:
+            unique_key = tuple(row[columns.index(col)] for col in unique_columns)
+            if unique_key not in seen:
+                seen.add(unique_key)
+                unique_values.append(row)
+        except (IndexError, ValueError) as e:
+            print(f"Error processing row {row}: {e}")
+            continue
+
+    if not unique_values:
+        print("No valid unique data rows found for app data")
+        cursor.close()
+        conn.close()
+        return
 
     # Prepare the ON CONFLICT clause for upsert
     conflict_clause = f"ON CONFLICT ({', '.join(unique_columns)}) DO UPDATE SET "
@@ -205,10 +244,11 @@ def lambda_handler(event, context):
             google_secrets = json.loads(google_secrets)
 
         db_config = {
-            'host': db_secrets['host'],
-            'port': db_secrets['port'],
+            'dbname': db_secrets['username'],
             'user': db_secrets['rw-user'],
-            'password': db_secrets['password']
+            'password': db_secrets['oldpassword'],
+            'host': db_secrets['host'],
+            'port': db_secrets['port']
         }
         
         # Read data from Google Sheets

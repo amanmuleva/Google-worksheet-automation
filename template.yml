@@ -2,6 +2,17 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: SAM Template to create a Database Automation Script to refresh the database with the new data from the google sheets
 
+Parameters:
+  SubnetIdsParam:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Subnet IDs for the VPC configuration
+    Default: "subnet-085349170f86a9b41,subnet-0bd407f12febb0260,subnet-09ce51be77d596219"
+
+  SecurityGroupIdsParam:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: List of Security Group IDs for the VPC configuration
+    Default: "sg-0f1b41dbc8b775ac1"
+
 Resources:
   DatabaseRefreshFunction:
     Type: AWS::Serverless::Function
@@ -11,8 +22,11 @@ Resources:
       Architectures:
         - arm64
       CodeUri: lambda_vsa_data
-      MemorySize: 128
+      MemorySize: 512
       Timeout: 300  
+      VpcConfig:
+        SecurityGroupIds: !Ref SecurityGroupIdsParam
+        SubnetIds: !Ref SubnetIdsParam
       Environment:
         Variables:
           PYTHONPATH: /var/runtime
