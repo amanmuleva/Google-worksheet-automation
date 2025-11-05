@@ -193,8 +193,8 @@ def lambda_handler(event, context):
         sheet_url_apps = 'https://docs.google.com/spreadsheets/d/1lAWbVaBkee1ruKvIdIly33hRLlVv4b_HlexzXu1l2kI/edit?usp=sharing'
         worksheet_name_apps = 'Current VSA Master List'
         worksheet_name_emp = 'VonagePersonVSAAttributes'
-        table_name_apps = 'vsa_app_classifications'
-        table_name_emp = 'employee_vsa_attributes'
+        table_name_apps = 'cloudquery.vsa_app_classifications'
+        table_name_emp = 'cloudquery.employee_vsa_attributes'
 
         db_secrets = get_secrets(secret_name_db, region_name)
         google_secrets = get_secrets(secret_name_gapi, region_name)
